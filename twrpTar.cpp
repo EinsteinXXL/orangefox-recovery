@@ -517,11 +517,7 @@ int twrpTar::extractTarFork() {
 				string temp;
 				char actual_filename[255];
 				twrpTar tars[9];
-				pthread_t tar_thread[9];
-				pthread_attr_t tattr;
-				unsigned thread_count = 0, i, start_thread_id = 1;
-				int ret, thread_error = 0;
-				void *thread_return;
+				unsigned i, start_thread_id = 1;
 
 				basefn = tarfn;
 				temp = basefn + "%i%02i";
@@ -547,84 +543,27 @@ int twrpTar::extractTarFork() {
 				} else {
 					start_thread_id = 0;
 				}
-				// Start threading encrypted restores
-				if (pthread_attr_init(&tattr)) {
-					LOGINFO("Unable to pthread_attr_init\n");
-					gui_err("restore_error=Error during restore process.");
-					close(progress_pipe_fd);
-					_exit(-1);
-				}
-				if (pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_JOINABLE)) {
-					LOGINFO("Error setting pthread_attr_setdetachstate\n");
-					gui_err("restore_error=Error during restore process.");
-					close(progress_pipe_fd);
-					_exit(-1);
-				}
-				if (pthread_attr_setscope(&tattr, PTHREAD_SCOPE_SYSTEM)) {
-					LOGINFO("Error setting pthread_attr_setscope\n");
-					gui_err("restore_error=Error during restore process.");
-					close(progress_pipe_fd);
-					_exit(-1);
-				}
-				/*if (pthread_attr_setstacksize(&tattr, 524288)) {
-					LOGERR("Error setting pthread_attr_setstacksize\n");
-					close(progress_pipe_fd);
-					_exit(-1);
-				}*/
+				// Sequential encrypted restore - avoids fork-in-pthread deadlock
 				for (i = start_thread_id; i < 9; i++) {
 					sprintf(actual_filename, temp.c_str(), i, 0);
 					if (TWFunc::Path_Exists(actual_filename)) {
-						thread_count++;
 						tars[i].basefn = basefn;
 						tars[i].setpassword(password);
 						tars[i].thread_id = i;
 						tars[i].progress_pipe_fd = progress_pipe_fd;
 						tars[i].part_settings = part_settings;
-						LOGINFO("Creating extract thread ID %i\n", i);
-						ret = pthread_create(&tar_thread[i], &tattr, extractMulti, (void*)&tars[i]);
-						if (ret) {
-							LOGINFO("Unable to create %i thread for extraction! %i\nContinuing in same thread (restore will be slower).\n", i, ret);
-							if (extractMulti((void*)&tars[i]) != 0) {
-								LOGINFO("Error extracting backup in thread %i.\n", i);
-								gui_err("restore_error=Error during restore process.");
-								close(progress_pipe_fd);
-								_exit(-1);
-							} else {
-								tars[i].thread_id = i + 1;
-							}
-						}
-						usleep(100000); // Need a short delay before starting the next thread or the threads will never finish for some reason.
-					} else {
-						break;
-					}
-				}
-				for (i = start_thread_id; i < thread_count + start_thread_id; i++) {
-					if (tars[i].thread_id == i) {
-						if (pthread_join(tar_thread[i], &thread_return)) {
-							LOGINFO("Error joining thread %i\n", i);
+						LOGINFO("Extracting encrypted segment %i (sequential)
+", i);
+						if (extractMulti((void*)&tars[i]) != 0) {
+							LOGINFO("Error extracting encrypted segment %i.
+", i);
 							gui_err("restore_error=Error during restore process.");
 							close(progress_pipe_fd);
 							_exit(-1);
-						} else {
-							LOGINFO("Joined thread %i.\n", i);
-							ret = (int)(intptr_t)thread_return;
-							if (ret != 0) {
-								thread_error = 1;
-								LOGINFO("Thread %i returned an error %i.\n", i, ret);
-								gui_err("restore_error=Error during restore process.");
-								close(progress_pipe_fd);
-								_exit(-1);
-							}
 						}
 					} else {
-						LOGINFO("Skipping joining thread %i because of pthread failure.\n", i);
+						break;
 					}
-				}
-				if (thread_error) {
-					LOGINFO("Error returned by one or more threads.\n");
-					gui_err("restore_error=Error during restore process.");
-					close(progress_pipe_fd);
-					_exit(-1);
 				}
 				LOGINFO("Finished encrypted restore.\n");
 				close(progress_pipe_fd);
