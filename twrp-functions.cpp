@@ -1318,8 +1318,6 @@ bool TWFunc::Try_Decrypting_Backup(string Restore_Path, string Password) {
 	{
 	  if (TWFunc::Try_Decrypting_File(Filename, Password) < 2)
 	    {
-	      DataManager::SetValue("tw_restore_password", "");	// Clear the bad password
-	      DataManager::SetValue("tw_restore_display", "");	// Also clear the display mask
 	      closedir(d);
 	      return false;
 	    }
