@@ -162,16 +162,13 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 			struct dirent* de;
 			unsigned long long regular_size = 0, encrypt_size = 0, target_size = 0, total_size;
 			unsigned enc_thread_id = 1, regular_thread_id = 0, i, start_thread_id = 1, core_count = 1;
-			int item_len, ret, thread_error = 0;
+			int item_len, ret;
 			std::vector<TarListStruct> RegularList;
 			std::vector<TarListStruct> EncryptList;
 			string FileName;
 			struct TarListStruct TarItem;
 			twrpTar reg, enc[9];
 			struct stat st;
-			pthread_t enc_thread[9];
-			pthread_attr_t tattr;
-			void *thread_return;
 
 			core_count = sysconf(_SC_NPROCESSORS_CONF);
 			if (core_count > 8)
@@ -302,31 +299,7 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 				}
 			}
 
-			if (pthread_attr_init(&tattr)) {
-				LOGINFO("Unable to pthread_attr_init\n");
-				gui_err("backup_error=Error creating backup.");
-				close(progress_pipe[1]);
-				_exit(-1);
-			}
-			if (pthread_attr_setdetachstate(&tattr, PTHREAD_CREATE_JOINABLE)) {
-				LOGINFO("Error setting pthread_attr_setdetachstate\n");
-				gui_err("backup_error=Error creating backup.");
-				close(progress_pipe[1]);
-				_exit(-1);
-			}
-			if (pthread_attr_setscope(&tattr, PTHREAD_SCOPE_SYSTEM)) {
-				LOGINFO("Error setting pthread_attr_setscope\n");
-				gui_err("backup_error=Error creating backup.");
-				close(progress_pipe[1]);
-				_exit(-1);
-			}
-			/*if (pthread_attr_setstacksize(&tattr, 524288)) {
-				LOGERR("Error setting pthread_attr_setstacksize\n");
-				close(progress_pipe[1]);
-				_exit(-1);
-			}*/
-
-			// Create threads for the divided up encryption lists
+			// Sequential encrypted backup - avoids fork-in-pthread deadlock
 			for (i = start_thread_id; i <= core_count; i++) {
 				enc[i].setdir(tardir);
 				enc[i].setfn(tarfn);
@@ -338,51 +311,13 @@ int twrpTar::createTarFork(pid_t *tar_fork_pid) {
 				enc[i].split_archives = 1;
 				enc[i].progress_pipe_fd = progress_pipe_fd;
 				enc[i].part_settings = part_settings;
-				LOGINFO("Start encryption thread %i\n", i);
-				ret = pthread_create(&enc_thread[i], &tattr, createList, (void*)&enc[i]);
-				if (ret) {
-					LOGINFO("Unable to create %i thread for encryption! %i\nContinuing in same thread (backup will be slower).\n", i, ret);
-					if (createList((void*)&enc[i]) != 0) {
-						LOGINFO("Error creating encrypted backup %i.\n", i);
-						gui_err("backup_error=Error creating backup.");
-						close(progress_pipe[1]);
-						_exit(-1);
-					} else {
-						enc[i].thread_id = i + 1;
-					}
+				LOGINFO("Creating encrypted backup segment %i (sequential)\n", i);
+				if (createList((void*)&enc[i]) != 0) {
+					LOGINFO("Error creating encrypted backup %i.\n", i);
+					gui_err("backup_error=Error creating backup.");
+					close(progress_pipe[1]);
+					_exit(-1);
 				}
-				usleep(100000); // Need a short delay before starting the next thread or the threads will never finish for some reason.
-			}
-			if (pthread_attr_destroy(&tattr)) {
-				LOGINFO("Failed to pthread_attr_destroy\n");
-			}
-			for (i = start_thread_id; i <= core_count; i++) {
-				if (enc[i].thread_id == i) {
-					if (pthread_join(enc_thread[i], &thread_return)) {
-						LOGINFO("Error joining thread %i\n", i);
-						gui_err("backup_error=Error creating backup.");
-						close(progress_pipe[1]);
-						_exit(-1);
-					} else {
-						LOGINFO("Joined thread %i.\n", i);
-						ret = (int)(intptr_t)thread_return;
-						if (ret != 0) {
-							thread_error = 1;
-							LOGINFO("Thread %i returned an error %i.\n", i, ret);
-							gui_err("backup_error=Error creating backup.");
-							close(progress_pipe[1]);
-							_exit(-1);
-						}
-					}
-				} else {
-					LOGINFO("Skipping joining thread %i because of pthread failure.\n", i);
-				}
-			}
-			if (thread_error) {
-				LOGINFO("Error returned by one or more threads.\n");
-				gui_err("backup_error=Error creating backup.");
-				close(progress_pipe[1]);
-				_exit(-1);
 			}
 			LOGINFO("Finished encrypted backup.\n");
 			close(progress_pipe[1]);
