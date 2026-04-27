@@ -552,11 +552,9 @@ int twrpTar::extractTarFork() {
 						tars[i].thread_id = i;
 						tars[i].progress_pipe_fd = progress_pipe_fd;
 						tars[i].part_settings = part_settings;
-						LOGINFO("Extracting encrypted segment %i (sequential)
-", i);
+						LOGINFO("Extracting encrypted segment %i (sequential)\n", i);
 						if (extractMulti((void*)&tars[i]) != 0) {
-							LOGINFO("Error extracting encrypted segment %i.
-", i);
+							LOGINFO("Error extracting encrypted segment %i.\n", i);
 							gui_err("restore_error=Error during restore process.");
 							close(progress_pipe_fd);
 							_exit(-1);
